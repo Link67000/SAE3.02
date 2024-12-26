@@ -2,6 +2,7 @@ import customtkinter
 from tkinter import filedialog
 import threading
 import socket
+import time
 
 customtkinter.set_appearance_mode("dark")
 customtkinter.set_default_color_theme("green")
@@ -12,14 +13,12 @@ class Sae(customtkinter.CTk):
         super().__init__()
 
         self.client_socket = None
-        
+
         def fermer():
             if self.client_socket:
                 self.client_socket.close()
-                self.destroy()
-            else:
-                print("[*] Vous avez fermé le programme client ! ")
-                self.destroy()
+                self.terminal.insert("0.0", "[*] Déconnexion du serveur.\n")
+            self.destroy()
 
         def importer_fichier():
             lang = self.langage_prog.get()
@@ -36,44 +35,39 @@ class Sae(customtkinter.CTk):
                 Ftype = []
 
             fichier = filedialog.askopenfilename(filetypes=Ftype)
-    
+
             if fichier:
                 try:
                     with open(fichier, "r", encoding="utf-8") as file:
                         contenu = file.read()
                     self.programme_txt.delete("0.0", "end")
                     self.programme_txt.insert("0.0", contenu)
+                    self.terminal.insert("0.0", f"[*] Fichier importé : {fichier}\n")
                 except Exception as e:
-                    print(f"[*] Erreur lors de la lecture du fichier : {e}")
-
+                    self.terminal.insert("0.0", f"[*] Erreur lors de la lecture du fichier : {e}\n")
 
         def envoyer_txt():
             if self.client_socket:
                 try:
                     programme = self.programme_txt.get("0.0", "end").strip()
                     self.client_socket.send(f"{programme}\n".encode())
+                    self.terminal.insert("0.0", "[*] Programme envoyé au serveur.\n")
                 except Exception as e:
-                    self.terminal.delete("0.0", "end")
-                    self.terminal.insert("0.0",f"vous n'êtes pas connecté ")
+                    self.terminal.insert("0.0", f"[*] Erreur lors de l'envoi : {e}\n")
             else:
-                self.terminal.delete("0.0", "end")
-                self.terminal.insert("0.0","[*] Vous devez vous connecter !\n\n")
+                self.terminal.insert("0.0", "[*] Vous devez d'abord vous connecter au serveur !\n")
 
         def connexion():
             try:
                 self.client_socket = socket.socket()
                 host = self.addr.get()
                 port = int(self.port.get())
+                self.terminal.insert("0.0", f"[*] Connexion au serveur {host}:{port}...\n")
                 self.client_socket.connect((host, port))
-                message = "client connecté"
-                self.client_socket.send(f"{message}\n".encode())
-                message = self.client_socket.recv(1024).decode()
-                self.terminal.delete("0.0", "end")
-                self.terminal.insert("0.0", f"[*] Réponse du serveur : {message}")
+                time.sleep(1)
+                self.terminal.insert("0.0", "[*] Connecté au serveur avec succès.\n")
             except Exception as e:
-                self.terminal.delete("0.0", "end")
-                self.terminal.insert("0.0", f"[*] Erreur de connexion : {e}")
-
+                self.terminal.insert("0.0", f"[*] Erreur de connexion : {e}\n")
 
         def thread_connexion():
             threading.Thread(target=connexion).start()
@@ -82,57 +76,57 @@ class Sae(customtkinter.CTk):
         self.geometry('820x400')
         self.resizable(False, False)
 
-    # Champ adresse
+        # Champ adresse
         self.addr_txt = customtkinter.CTkLabel(self, width=100, height=30, text="adresse :")
         self.addr_txt.place(x=10, y=10)
         self.addr = customtkinter.CTkEntry(self, width=170, height=30, justify="center")
         self.addr.place(x=120, y=10)
-        self.addr.insert(0, "127.0.0.1")
+        self.addr.insert(0, "192.168.y.x")
 
-    # Champ port
+        # Champ port
         self.port_txt = customtkinter.CTkLabel(self, width=100, height=30, text="port :")
         self.port_txt.place(x=10, y=50)
         self.port = customtkinter.CTkEntry(self, width=170, height=30, justify="center")
         self.port.place(x=120, y=50)
-        self.port.insert(0, "10000")
+        self.port.insert(0, "1111")
 
-    # champ Langage de prog
+        # Champ Langage de prog
         lang = ["Python", "C++", "C", "Java"]
         self.prog_txt = customtkinter.CTkLabel(self, width=100, height=30, text="Type de fichier :")
         self.prog_txt.place(x=200, y=360)
-        self.langage_prog = customtkinter.CTkComboBox(self,state="readonly", values=lang, width=120, height=30, justify="center")
+        self.langage_prog = customtkinter.CTkComboBox(self, state="readonly", values=lang, width=120, height=30, justify="center")
         self.langage_prog.set("Python")
         self.langage_prog.place(x=305, y=360)
 
-    # champ connexion
+        # Bouton connexion
         self.connexion = customtkinter.CTkButton(self, text="connexion", width=280, height=30, command=thread_connexion)
         self.connexion.place(x=10, y=90)
 
-    # Bouton envoyer
+        # Bouton envoyer
         self.envoyer = customtkinter.CTkButton(self, text="envoyer", width=120, height=30, command=envoyer_txt)
         self.envoyer.place(x=565, y=360)
 
-    # Bouton quitter
+        # Bouton quitter
         self.quitter = customtkinter.CTkButton(self, text="quitter", width=120, height=30, command=fermer)
         self.quitter.place(x=695, y=360)
 
-    # Champ programme
+        # Zone programme
         self.programme_txt = customtkinter.CTkTextbox(self, width=510, height=340)
         self.programme_txt.place(x=305, y=10)
         self.programme_txt.insert(0.0, "Zone d'insertion pour les programmes :")
 
-    # Champ terminal
-        self.etat_txt = customtkinter.CTkLabel(self, width=100, height=30, text="Etat serveur et retour sur programme :")
+        # Zone terminal
+        self.etat_txt = customtkinter.CTkLabel(self, width=100, height=30, text="Etat client et retour sur programme :")
         self.etat_txt.place(x=10, y=125)
         self.terminal = customtkinter.CTkTextbox(self, width=280, height=190)
         self.terminal.place(x=10, y=160)
-        self.terminal.insert(0.0,"")
-        
-    # champ aide
+        self.terminal.insert("0.0", "")
+
+        # Bouton aide
         self.aide_txt = customtkinter.CTkButton(self, text="?", width=30, height=30)
         self.aide_txt.place(x=10, y=360)
 
-    # champ importer
+        # Bouton importer
         self.bouton_importer = customtkinter.CTkButton(self, text="importer", width=120, height=30, command=importer_fichier)
         self.bouton_importer.place(x=435, y=360)
 
