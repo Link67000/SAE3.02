@@ -6,6 +6,7 @@ import customtkinter
 customtkinter.set_appearance_mode("dark")
 customtkinter.set_default_color_theme("green")
 
+
 class MasterApp(customtkinter.CTk):
     def __init__(self):
         super().__init__()
@@ -103,8 +104,8 @@ class MasterApp(customtkinter.CTk):
                 self.log("[*] Le client a été connecté.")
                 if role not in self.clients:
                     self.clients[role] = client_socket  # Ajouter le client
-                # Appeler la fonction qui écoute les messages du client
-                self.listen_to_client_messages(client_socket)
+                # Attendre un programme d'un client et envoyer à un slave si besoin
+                self.wait_for_program_from_client(client_socket)
                 return
 
             # Si le rôle est "slave", on l'ajoute dans le dictionnaire des slaves
@@ -114,82 +115,82 @@ class MasterApp(customtkinter.CTk):
             self.slaves[role].append(client_socket)
             self.log(f"[*] Le slave {role} a été ajouté aux slaves.")
 
+            # Attente de la réception d'un programme d'un client et gestion de l'envoi au slave approprié
+            self.wait_for_program_from_client(client_socket)
+
         except Exception as e:
             self.log(f"[!] Erreur lors du traitement du client : {e}")
             client_socket.sendall(f"Erreur lors du traitement : {e}".encode('utf-8'))
 
-    def listen_to_client_messages(self, client_socket):
-        """Fonction dédiée pour écouter et traiter les messages envoyés par le client."""
-        try:
-            while True:
-                message = client_socket.recv(4096).decode("utf-8")
-                if not message:
-                    self.log("[!] Le client a fermé la connexion.")
-                    break
 
-                self.log(f"[+] Message reçu : {message}")
+    def wait_for_program_from_client(self, client_socket):
+        """Attends un programme d'un client et l'envoie au slave correspondant."""
+        while True:
+            # Réception du programme envoyé par le client (format JSON attendu)
+            message = client_socket.recv(4096).decode("utf-8")
 
+            if message:
                 try:
-                    # Décodage du message en JSON
-                    data = json.loads(message)
-                    file_type = data.get("type_de_fichier", "Unknown")
-                    code = data.get("code", "")
-                    programme = data.get("programme", "")
+                    # Supposons que le message est un JSON avec un champ 'type' pour identifier le programme
+                    program_data = json.loads(message)
+                    program_type = program_data.get("type_de_fichier", "")
 
-                    # Affichage des informations reçues pour vérification
-                    self.log(f"Type de fichier : {file_type}")
-                    self.log(f"Code reçu : {code}")
-                    self.log(f"Programme reçu : {programme}")
-
-                    # Décider du Slave en fonction du type de fichier
-                    target_slave = self.get_target_slave(file_type)
-                    if target_slave:
-                        self.forward_to_slave(target_slave, file_type, code, programme, client_socket)
+                    # Vérifie si un slave correspondant au type du programme est connecté
+                    if program_type in ["C", "C++"]:
+                        # Recherche d'un slave pour "C/C++"
+                        if self.slaves.get("C/C++"):
+                            self.log(f"[*] Envoi du programme {program_type} au slave C/C++.")
+                            slave_socket = self.slaves["C/C++"][0]  # Utilisation du premier slave disponible
+                            self.send_program_to_slave(client_socket, slave_socket, program_data)
+                        else:
+                            self.log(f"[!] Aucun slave C/C++ disponible.")
+                            client_socket.sendall("Erreur : Aucun slave C/C++ disponible.".encode("utf-8"))
+                    elif program_type in ["JAVA", "Python"]:
+                        # Recherche d'un slave pour "JAVA/Python"
+                        if self.slaves.get("JAVA/Python"):
+                            self.log(f"[*] Envoi du programme {program_type} au slave JAVA/Python.")
+                            slave_socket = self.slaves["JAVA/Python"][0]  # Utilisation du premier slave disponible
+                            self.send_program_to_slave(client_socket, slave_socket, program_data)
+                        else:
+                            self.log(f"[!] Aucun slave JAVA/Python disponible.")
+                            client_socket.sendall("Erreur : Aucun slave JAVA/Python disponible.".encode("utf-8"))
                     else:
-                        self.log(f"[!] Aucun Slave disponible pour le type : {file_type}")
-                        client_socket.sendall("Erreur: Aucun Slave disponible.".encode('utf-8'))
+                        self.log(f"[!] Type de programme non supporté : {program_type}.")
+                        client_socket.sendall(f"Erreur : Type de programme non supporté.".encode("utf-8"))
 
                 except json.JSONDecodeError:
-                    self.log("[!] Erreur : données non valides reçues.")
-                    client_socket.sendall("Erreur: Données invalides.".encode('utf-8'))
+                    self.log("[!] Erreur de décodage JSON.")
+                    client_socket.sendall("Erreur : Programme mal formé.".encode("utf-8"))
+                except Exception as e:
+                    self.log(f"[!] Erreur lors du traitement du programme : {e}")
+                    client_socket.sendall(f"Erreur lors du traitement du programme : {e}".encode("utf-8"))
 
-        except Exception as e:
-            self.log(f"[!] Erreur lors de l'écoute des messages du client : {e}")
-            client_socket.sendall(f"Erreur lors de l'écoute des messages : {e}".encode('utf-8'))
 
-    def get_target_slave(self, file_type):
-        """Retourne un socket de Slave correspondant au rôle."""
-        if file_type in self.slaves and self.slaves[file_type]:
-            # Load balancing simple : prendre le premier Slave disponible
-            return self.slaves[file_type][0]
-        return None
-
-    def forward_to_slave(self, slave_socket, file_type, code, programme, client_socket):
-        """Envoie le fichier au Slave sélectionné et attend la réponse à renvoyer au client."""
+    def send_program_to_slave(self, client_socket, slave_socket, program_data):
+        """Envoie le programme du client au slave approprié."""
         try:
-            # Ajouter le programme dans le message envoyé au slave
-            message = json.dumps({"type_de_fichier": file_type, "code": code, "programme": programme})
-            slave_socket.sendall(message.encode("utf-8"))
-            self.log(f"[>] Envoyé au Slave : {file_type}, {programme}")
+            # Envoie du programme au slave
+            slave_socket.sendall(json.dumps(program_data).encode("utf-8"))
+            self.log(f"[>] Programme envoyé au slave.")
 
-            # Attente de la réponse du slave
+            # Attendre la réponse du slave et l'envoyer au client
             response = slave_socket.recv(4096).decode("utf-8")
-            self.log(f"[<] Réponse du Slave : {response}")
-
-            # Renvoyer la réponse au client
             client_socket.sendall(response.encode("utf-8"))
             self.log(f"[<] Réponse envoyée au client.")
         except Exception as e:
-            self.log(f"[!] Erreur d'envoi au Slave ou au client : {e}")
+            self.log(f"[!] Erreur lors de l'envoi au slave ou au client : {e}")
+
 
     def fermer_proprement(self):
         """Ferme proprement le serveur."""
         self.stop_server()
         self.destroy()
 
+
 def main():
     app = MasterApp()
     app.mainloop()
+
 
 if __name__ == "__main__":
     main()
