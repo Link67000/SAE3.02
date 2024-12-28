@@ -8,20 +8,21 @@ import customtkinter
 customtkinter.set_appearance_mode("dark")
 customtkinter.set_default_color_theme("blue")
 
+
 class SlaveApp(customtkinter.CTk):
     def __init__(self):
         super().__init__()
 
         self.client_socket = None
         self.running = False
-        self.max_programs = 5  # Nombre max de programmes pouvant tourner simultanément
-        self.current_programs = 0  # Compteur de programmes en cours
-        self.lock = threading.Lock()  # Verrou pour gérer l'accès à current_programs
+        self.max_programs = 5  # Par défaut
+        self.current_programs = 0
+        self.lock = threading.Lock()
 
         self.title("Slave")
         self.geometry("500x400")
 
-        # Interface utilisateur pour l'adresse IP et le port
+        # Interface utilisateur
         self.master_addr_txt = customtkinter.CTkLabel(self, text="Adresse du Master :")
         self.master_addr_txt.place(x=10, y=10)
         self.master_addr = customtkinter.CTkEntry(self, width=150, justify="center")
@@ -61,7 +62,7 @@ class SlaveApp(customtkinter.CTk):
             self.running = True
             self.log("[*] Connecté au Master.")
 
-            # Envoi du rôle C/C++ au Master dès la connexion
+            # Envoi du rôle
             role = "C/C++"
             self.client_socket.sendall(role.encode("utf-8"))
 
@@ -88,11 +89,10 @@ class SlaveApp(customtkinter.CTk):
                     file_type = data.get("type_de_fichier", "Inconnu")
                     program_code = data.get("programme", "")
                     load_balancing = data.get("loadB", self.max_programs)
-
-                    self.log(f"[*] Tâche reçue : {file_type}\nCode : {program_code}\nLoad Balancing : {load_balancing}")
+                    self.log(f"[*] Tâche reçue : {file_type}\n[*]Load Balancing : {load_balancing}\n[*] Programme: {program_code}")
 
                     # Traiter la tâche
-                    self.process_task(file_type, program_code, load_balancing)
+                    threading.Thread(target=self.process_task, args=(file_type, program_code, load_balancing)).start()
 
                 except json.JSONDecodeError:
                     self.log("[!] Erreur : données non valides reçues.")
@@ -102,74 +102,59 @@ class SlaveApp(customtkinter.CTk):
 
     def process_task(self, file_type, program_code, load_balancing):
         try:
-            self.log(f"[*] Traitement de la tâche : {file_type}, {program_code}, {load_balancing}")
-
-            # Vérification du nombre maximal de programmes en cours
             with self.lock:
                 if self.current_programs >= load_balancing:
-                    # Si le nombre de programmes en cours est dépassé
                     self.log("[!] Nombre maximum de programmes atteint.")
                     response = json.dumps({"error": "Nombre maximum de programmes atteint."})
                     self.client_socket.sendall(response.encode("utf-8"))
                     return
-
-                # Incrémentation du compteur de programmes en cours
                 self.current_programs += 1
-                self.log(f"[*] Nombre de programmes en cours : {self.current_programs}")
 
-            # Enregistrer le code dans un fichier temporaire
+            # Déterminer le fichier source et le compilateur
             if file_type == "C":
-                filename = "program.c"
+                filename = "temp_program.c"
                 compiler = "gcc"
             elif file_type == "C++":
-                filename = "program.cpp"
+                filename = "temp_program.cpp"
                 compiler = "g++"
             else:
                 self.log(f"[!] Type de fichier inconnu : {file_type}")
                 return
 
-            self.log(f"[*] Enregistrement du programme dans {filename}")
             with open(filename, "w") as f:
                 f.write(program_code)
-            
-            # Compiler le programme
-            compile_command = [compiler, filename, "-o", "program"]
-            self.log(f"[*] Compilation avec la commande : {' '.join(compile_command)}")
-            compile_process = subprocess.Popen(compile_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            stdout, stderr = compile_process.communicate()
+
+            # Compilation
+            compile_command = [compiler, filename, "-o", "temp_program"]
+            compile_process = subprocess.run(compile_command, capture_output=True, text=True)
 
             if compile_process.returncode != 0:
-                # Si la compilation échoue
-                self.log(f"[!] Erreur de compilation : {stderr.decode()}")
-                response = json.dumps({"error": stderr.decode()})
+                self.log(f"[!] Erreur de compilation : {compile_process.stderr}")
+                response = json.dumps({"error": compile_process.stderr})
                 self.client_socket.sendall(response.encode("utf-8"))
                 return
 
-            self.log(f"[*] Compilation réussie.")
-
-            # Exécuter le programme compilé
-            execute_process = subprocess.Popen("./program", stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            stdout, stderr = execute_process.communicate()
+            # Exécution
+            execute_process = subprocess.run(["./temp_program"], capture_output=True, text=True)
 
             if execute_process.returncode != 0:
-                # Si l'exécution échoue
-                self.log(f"[!] Erreur d'exécution : {stderr.decode()}")
-                response = json.dumps({"error": stderr.decode()})
-                self.client_socket.sendall(response.encode("utf-8"))
+                self.log(f"[!] Erreur d'exécution : {execute_process.stderr}")
+                response = json.dumps({"error": execute_process.stderr})
             else:
-                # Si tout se passe bien
-                result = stdout.decode()
-                self.log(f"[*] Résultat du programme : {result}")
-                response = json.dumps({"resultat": result})
-                self.client_socket.sendall(response.encode("utf-8"))
+                self.log(f"[*] Résultat : {execute_process.stdout}")
+                response = json.dumps({"resultat": execute_process.stdout})
+
+            self.client_socket.sendall(response.encode("utf-8"))
 
         except Exception as e:
-            self.log(f"[!] Erreur de traitement : {e}")
+            self.log(f"[!] Erreur : {e}")
         finally:
             with self.lock:
-                # Décrémentation après traitement
                 self.current_programs -= 1
-                self.log(f"[*] Nombre de programmes en cours après traitement : {self.current_programs}")
+            # Nettoyage
+            os.remove(filename)
+            if os.path.exists("temp_program"):
+                os.remove("temp_program")
 
     def fermer_proprement(self):
         self.stop_client()
