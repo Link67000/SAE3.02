@@ -61,6 +61,7 @@ class Sae(customtkinter.CTk):
                         return
 
                     lang = self.langage_prog.get()
+                    self.terminal.insert("0.0", f"[*] Vous envoyez un fichier type : {lang}\n")
                     if lang not in ["Python", "C++", "C", "Java"]:
                         self.terminal.insert("0.0", "[*] Aucune extension de fichier valide sélectionnée.\n")
                         return
@@ -70,7 +71,7 @@ class Sae(customtkinter.CTk):
                         "type_de_fichier": lang,
                         "code": programme,
                     }
-
+                    self.terminal.insert("0.0", f"[*] Vous envoyez un format : {payload}\n")
                     # Encodage en JSON
                     message = json.dumps(payload)
 
