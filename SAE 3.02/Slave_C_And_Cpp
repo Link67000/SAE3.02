@@ -3,11 +3,11 @@ import threading
 import json
 import subprocess
 import os
+import uuid
 import customtkinter
 
 customtkinter.set_appearance_mode("dark")
 customtkinter.set_default_color_theme("blue")
-
 
 class SlaveApp(customtkinter.CTk):
     def __init__(self):
@@ -87,7 +87,7 @@ class SlaveApp(customtkinter.CTk):
                 try:
                     data = json.loads(message)
                     file_type = data.get("type_de_fichier", "Inconnu")
-                    program_code = data.get("programme", "")
+                    program_code = data.get("code", "")
                     load_balancing = data.get("loadB", self.max_programs)
                     self.log(f"[*] Tâche reçue : {file_type}\n[*]Load Balancing : {load_balancing}\n[*] Programme: {program_code}")
 
@@ -110,14 +110,13 @@ class SlaveApp(customtkinter.CTk):
                     return
                 self.current_programs += 1
 
-            # Déterminer le fichier source et le compilateur
-            if file_type == "C":
-                filename = "temp_program.c"
-                compiler = "gcc"
-            elif file_type == "C++":
-                filename = "temp_program.cpp"
-                compiler = "g++"
-            else:
+            # Générer des noms uniques pour les fichiers
+            filename = f"/tmp/temp_{uuid.uuid4().hex}.c" if file_type == "C" else f"/tmp/temp_{uuid.uuid4().hex}.cpp"
+            executable = f"/tmp/temp_{uuid.uuid4().hex}"
+
+            # Déterminer le compilateur
+            compiler = "gcc" if file_type == "C" else "g++" if file_type == "C++" else None
+            if not compiler:
                 self.log(f"[!] Type de fichier inconnu : {file_type}")
                 return
 
@@ -125,7 +124,7 @@ class SlaveApp(customtkinter.CTk):
                 f.write(program_code)
 
             # Compilation
-            compile_command = [compiler, filename, "-o", "temp_program"]
+            compile_command = [compiler, filename, "-o", executable]
             compile_process = subprocess.run(compile_command, capture_output=True, text=True)
 
             if compile_process.returncode != 0:
@@ -134,8 +133,11 @@ class SlaveApp(customtkinter.CTk):
                 self.client_socket.sendall(response.encode("utf-8"))
                 return
 
+            # Donner les permissions d'exécution
+            subprocess.run(["chmod", "+x", executable])
+
             # Exécution
-            execute_process = subprocess.run(["./temp_program"], capture_output=True, text=True)
+            execute_process = subprocess.run([executable], capture_output=True, text=True)
 
             if execute_process.returncode != 0:
                 self.log(f"[!] Erreur d'exécution : {execute_process.stderr}")
@@ -152,9 +154,10 @@ class SlaveApp(customtkinter.CTk):
             with self.lock:
                 self.current_programs -= 1
             # Nettoyage
-            os.remove(filename)
-            if os.path.exists("temp_program"):
-                os.remove("temp_program")
+            if os.path.exists(filename):
+                os.remove(filename)
+            if os.path.exists(executable):
+                os.remove(executable)
 
     def fermer_proprement(self):
         self.stop_client()
