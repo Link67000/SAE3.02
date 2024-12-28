@@ -173,6 +173,7 @@ class MasterApp(customtkinter.CTk):
             # Envoie du programme au slave
             slave_socket.sendall(json.dumps(program_data).encode("utf-8"))
             self.log(f"[>] Programme envoyé au slave.")
+            self.log(f"[!] envoie : {program_data}")
 
             # Attendre la réponse du slave et l'envoyer au client
             response = slave_socket.recv(4096).decode("utf-8")
