@@ -131,6 +131,7 @@ class MasterApp(customtkinter.CTk):
 
             if message:
                 try:
+                    self.log(f"[!] message : {message}")
                     # Supposons que le message est un JSON avec un champ 'type' pour identifier le programme
                     program_data = json.loads(message)
                     program_type = program_data.get("type_de_fichier", "")
