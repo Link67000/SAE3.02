@@ -2,21 +2,24 @@ import customtkinter
 from tkinter import filedialog
 import threading
 import socket
+import json
 import time
+import os
 
 customtkinter.set_appearance_mode("dark")
 customtkinter.set_default_color_theme("green")
-
 
 class Sae(customtkinter.CTk):
     def __init__(self):
         super().__init__()
 
         self.client_socket = None
+        self.is_connected = False  # Indicateur de la connexion
 
         def fermer():
             if self.client_socket:
                 self.client_socket.close()
+                self.is_connected = False
                 self.terminal.insert("0.0", "[*] Déconnexion du serveur.\n")
             self.destroy()
 
@@ -47,15 +50,57 @@ class Sae(customtkinter.CTk):
                     self.terminal.insert("0.0", f"[*] Erreur lors de la lecture du fichier : {e}\n")
 
         def envoyer_txt():
-            if self.client_socket:
+            if self.client_socket and self.is_connected:
                 try:
+                    # Récupération des données
                     programme = self.programme_txt.get("0.0", "end").strip()
-                    self.client_socket.send(f"{programme}\n".encode())
-                    self.terminal.insert("0.0", "[*] Programme envoyé au serveur.\n")
+                    print(f"Contenu récupéré : {programme}")  # Debug
+
+                    if not programme:
+                        self.terminal.insert("0.0", "[*] Le contenu du programme est vide. Rien à envoyer.\n")
+                        return
+
+                    lang = self.langage_prog.get()
+                    if lang not in ["Python", "C++", "C", "Java"]:
+                        self.terminal.insert("0.0", "[*] Aucune extension de fichier valide sélectionnée.\n")
+                        return
+
+                    # Structure des données à envoyer
+                    payload = {
+                        "type_de_fichier": lang,
+                        "code": programme,
+                    }
+
+                    # Encodage en JSON
+                    message = json.dumps(payload)
+
+                    # Envoi au serveur
+                    self.client_socket.sendall(message.encode("utf-8"))
+                    self.terminal.insert("0.0", "[*] Programme envoyé au serveur avec succès.\n")
+
+                except socket.error as e:
+                    self.terminal.insert("0.0", f"[*] Erreur de socket lors de l'envoi : {e}\n")
+                except json.JSONDecodeError as e:
+                    self.terminal.insert("0.0", f"[*] Erreur de JSON : {e}\n")
                 except Exception as e:
-                    self.terminal.insert("0.0", f"[*] Erreur lors de l'envoi : {e}\n")
+                    self.terminal.insert("0.0", f"[*] Autre erreur : {e}\n")
             else:
                 self.terminal.insert("0.0", "[*] Vous devez d'abord vous connecter au serveur !\n")
+        
+
+        def recevoir_reponse():
+            if self.client_socket and self.is_connected:
+                try:
+                    while True:  # Garder la session ouverte pour recevoir des réponses
+                        response = self.client_socket.recv(4096).decode()
+                        if response:
+                            # Utilisation de 'after' pour mettre à jour la UI depuis un thread secondaire
+                            self.after(0, self.terminal.insert, "0.0", f"[*] Réponse reçue : {response}\n")
+                        else:
+                            break
+                except Exception as e:
+                    self.after(0, self.terminal.insert, "0.0", f"[*] Erreur lors de la réception de la réponse : {e}\n")
+                    self.is_connected = False
 
         def connexion():
             try:
@@ -64,9 +109,18 @@ class Sae(customtkinter.CTk):
                 port = int(self.port.get())
                 self.terminal.insert("0.0", f"[*] Connexion au serveur {host}:{port}...\n")
                 self.client_socket.connect((host, port))
+                self.is_connected = True
                 time.sleep(1)
                 self.terminal.insert("0.0", "[*] Connecté au serveur avec succès.\n")
+
+                # Envoi du rôle 'client' en tant que chaîne de caractères
+                self.client_socket.sendall("client".encode())
+
+                # Démarrer un thread pour écouter les réponses du serveur
+                threading.Thread(target=recevoir_reponse, daemon=True).start()
+
             except Exception as e:
+                self.is_connected = False
                 self.terminal.insert("0.0", f"[*] Erreur de connexion : {e}\n")
 
         def thread_connexion():
@@ -76,21 +130,18 @@ class Sae(customtkinter.CTk):
         self.geometry('820x400')
         self.resizable(False, False)
 
-        # Champ adresse
         self.addr_txt = customtkinter.CTkLabel(self, width=100, height=30, text="adresse :")
         self.addr_txt.place(x=10, y=10)
         self.addr = customtkinter.CTkEntry(self, width=170, height=30, justify="center")
         self.addr.place(x=120, y=10)
         self.addr.insert(0, "192.168.y.x")
 
-        # Champ port
         self.port_txt = customtkinter.CTkLabel(self, width=100, height=30, text="port :")
         self.port_txt.place(x=10, y=50)
         self.port = customtkinter.CTkEntry(self, width=170, height=30, justify="center")
         self.port.place(x=120, y=50)
         self.port.insert(0, "1111")
 
-        # Champ Langage de prog
         lang = ["Python", "C++", "C", "Java"]
         self.prog_txt = customtkinter.CTkLabel(self, width=100, height=30, text="Type de fichier :")
         self.prog_txt.place(x=200, y=360)
@@ -98,43 +149,34 @@ class Sae(customtkinter.CTk):
         self.langage_prog.set("Python")
         self.langage_prog.place(x=305, y=360)
 
-        # Bouton connexion
         self.connexion = customtkinter.CTkButton(self, text="connexion", width=280, height=30, command=thread_connexion)
         self.connexion.place(x=10, y=90)
 
-        # Bouton envoyer
         self.envoyer = customtkinter.CTkButton(self, text="envoyer", width=120, height=30, command=envoyer_txt)
         self.envoyer.place(x=565, y=360)
 
-        # Bouton quitter
         self.quitter = customtkinter.CTkButton(self, text="quitter", width=120, height=30, command=fermer)
         self.quitter.place(x=695, y=360)
 
-        # Zone programme
         self.programme_txt = customtkinter.CTkTextbox(self, width=510, height=340)
         self.programme_txt.place(x=305, y=10)
         self.programme_txt.insert(0.0, "Zone d'insertion pour les programmes :")
 
-        # Zone terminal
         self.etat_txt = customtkinter.CTkLabel(self, width=100, height=30, text="Etat client et retour sur programme :")
         self.etat_txt.place(x=10, y=125)
         self.terminal = customtkinter.CTkTextbox(self, width=280, height=190)
         self.terminal.place(x=10, y=160)
         self.terminal.insert("0.0", "")
 
-        # Bouton aide
         self.aide_txt = customtkinter.CTkButton(self, text="?", width=30, height=30)
         self.aide_txt.place(x=10, y=360)
 
-        # Bouton importer
         self.bouton_importer = customtkinter.CTkButton(self, text="importer", width=120, height=30, command=importer_fichier)
         self.bouton_importer.place(x=435, y=360)
-
 
 def main():
     app = Sae()
     app.mainloop()
-
 
 if __name__ == '__main__':
     main()
