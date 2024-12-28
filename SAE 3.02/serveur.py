@@ -1,39 +1,39 @@
-import customtkinter
-import threading
-import subprocess
 import socket
-import os
-import time
+import threading
+import json
+import customtkinter
 
 customtkinter.set_appearance_mode("dark")
 customtkinter.set_default_color_theme("green")
 
-
-class ServeurMaster(customtkinter.CTk):
+class MasterApp(customtkinter.CTk):
     def __init__(self):
         super().__init__()
 
-        # Initialisation des variables
         self.server_socket = None
-        self.server_thread = None
-        self.en_fonctionnement = False
-        self.clients = []
-        self.max_clients = 5
+        self.client_threads = []
+        self.clients = {}
+        self.slaves = {
+            "C/C++": [],
+            "JAVA/Python": []
+        }
+        self.load_balance_counter = 0
 
-        # Configuration de la fenêtre
-        self.title('SAE Serveur Maître')
-        self.geometry('400x500')
-        self.resizable(False, False)
+        self.title("Master")
+        self.geometry("500x600")
 
-        # Récupère l'adresse IP de la VM
-        self.local_ip = self.get_local_ip()
-
-        # Champs de saisie et labels
+        # Interface utilisateur
         self.addr_txt = customtkinter.CTkLabel(self, text="Adresse :")
         self.addr_txt.place(x=10, y=10)
         self.addr = customtkinter.CTkEntry(self, width=150, justify="center")
         self.addr.place(x=120, y=10)
-        self.addr.insert(0, self.local_ip)  # Définit l'adresse IP locale par défaut
+        self.addr.insert(0, "192.168.1.80")
+        
+        self.loadB = customtkinter.CTkLabel(self, text="loadB :")
+        self.loadB.place(x=10, y=90)
+        self.nb_max = customtkinter.CTkEntry(self, width=150, justify="center")
+        self.nb_max.place(x=120, y=90)
+        self.nb_max.insert(0, "5")
 
         self.port_txt = customtkinter.CTkLabel(self, text="Port :")
         self.port_txt.place(x=10, y=50)
@@ -41,112 +41,155 @@ class ServeurMaster(customtkinter.CTk):
         self.port.place(x=120, y=50)
         self.port.insert(0, "1111")
 
-        self.start_stop_button = customtkinter.CTkButton(self, text="Allumer", width=380, height=30, command=self.toggle_server)
-        self.start_stop_button.place(x=10, y=130)
+        self.start_stop_button = customtkinter.CTkButton(self, text="Démarrer", width=380, height=30, command=self.toggle_server)
+        self.start_stop_button.place(x=10, y=140)
 
-        self.etat_txt = customtkinter.CTkLabel(self, text="État serveur et suivi connexion :")
-        self.etat_txt.place(x=10, y=170)
-        self.suivi_txt = customtkinter.CTkTextbox(self, width=380, height=250)
-        self.suivi_txt.place(x=10, y=200)
+        self.etat_txt = customtkinter.CTkLabel(self, text="État :")
+        self.etat_txt.place(x=10, y=150)
+        self.suivi_txt = customtkinter.CTkTextbox(self, width=480, height=300)
+        self.suivi_txt.place(x=10, y=180)
 
         self.protocol("WM_DELETE_WINDOW", self.fermer_proprement)
 
-    def get_local_ip(self):
-        """Récupère l'adresse IP locale de la machine."""
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.settimeout(0)
-        try:
-            # Essaie de se connecter à un hôte extérieur pour obtenir l'adresse IP
-            s.connect(('10.254.254.254', 1))
-            local_ip = s.getsockname()[0]
-        except Exception:
-            local_ip = '127.0.0.1'  # Si cela échoue, on retourne l'IP localhost
-        finally:
-            s.close()
-        return local_ip
-
     def log(self, message):
-        """Ajoute un message dans la zone de suivi."""
         self.suivi_txt.insert("1.0", message + "\n")
         print(message)
 
     def toggle_server(self):
-        """Démarre ou arrête le serveur."""
-        if not self.en_fonctionnement:
+        if self.server_socket is None:
             self.start_server()
-            self.start_stop_button.configure(text="Éteindre")
+            self.start_stop_button.configure(text="Arrêter")
         else:
             self.stop_server()
-            self.start_stop_button.configure(text="Allumer")
+            self.start_stop_button.configure(text="Démarrer")
 
     def start_server(self):
-        """Démarre le serveur."""
         try:
             self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        
-            # Ajout de l'option SO_REUSEADDR
-            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.server_socket.bind((self.addr.get(), int(self.port.get())))
+            self.server_socket.listen(7)
 
-            host = self.addr.get()
-            port = int(self.port.get())
-            self.server_socket.bind((host, port))
-            self.server_socket.listen(self.max_clients)
-
-            self.log(f"[*] Serveur lancé sur {host}:{port}")
-            self.en_fonctionnement = True
-
-            self.server_thread = threading.Thread(target=self.accept_clients, daemon=True)
-            self.server_thread.start()
+            self.log("[*] Serveur Master démarré.")
+            threading.Thread(target=self.accept_clients, daemon=True).start()
         except Exception as e:
             self.log(f"[!] Erreur : {e}")
 
-
     def stop_server(self):
-        """Arrête le serveur."""
         if self.server_socket:
-            for client in self.clients:
-                client.close()
             self.server_socket.close()
-        self.en_fonctionnement = False
+            self.server_socket = None
         self.log("[*] Serveur arrêté proprement.")
+
+    def accept_clients(self):
+        while self.server_socket:
+            try:
+                client_socket, addr = self.server_socket.accept()
+                self.log(f"[*] Connexion depuis {addr}")
+
+                thread = threading.Thread(target=self.handle_client, args=(client_socket,), daemon=True)
+                self.client_threads.append(thread)
+                thread.start()
+            except Exception as e:
+                self.log(f"[!] Erreur : {e}")
 
     def handle_client(self, client_socket):
         try:
-            while self.en_fonctionnement:
-            # Réception des données
-                data = client_socket.recv(1024).decode('utf-8').strip()
-                if not data:
-                    break  # Le client a fermé la connexion
+            # Réception initiale du rôle du client
+            role = client_socket.recv(4096).decode("utf-8").strip()
+            self.log(f"Rôle reçu : {role}")
 
-                # Affiche les données reçues
-                self.log(f"[*] Programme reçu :\n{data}")
+            # Si le rôle est "client", on l'ajoute dans le dictionnaire des clients
+            if role == "client":
+                self.log("[*] Le client a été connecté.")
+                if role not in self.clients:
+                    self.clients[role] = client_socket  # Ajouter le client
+                # Appeler la fonction qui écoute les messages du client
+                self.listen_to_client_messages(client_socket)
+                return
 
-            # Exemple de traitement des données
-                with open("programme_recu.txt", "w", encoding="utf-8") as file:
-                    file.write(data)
-                self.log("[*] Le programme a été enregistré avec succès.")
+            # Si le rôle est "slave", on l'ajoute dans le dictionnaire des slaves
+            if role not in self.slaves:
+                self.slaves[role] = []
+
+            self.slaves[role].append(client_socket)
+            self.log(f"[*] Le slave {role} a été ajouté aux slaves.")
+
         except Exception as e:
-            self.log(f"[*] Erreur lors du traitement des données : {e}")
-        finally:
-            client_socket.close()
+            self.log(f"[!] Erreur lors du traitement du client : {e}")
+            client_socket.sendall(f"Erreur lors du traitement : {e}".encode('utf-8'))
 
-    def accept_clients(self):
-        """Accepte les connexions entrantes."""
-        while self.en_fonctionnement:
-            try:
-                client_socket, addr = self.server_socket.accept()
-                self.log(f"[*] Connexion acceptée depuis {addr}")
-                threading.Thread(target=self.handle_client, args=(client_socket,), daemon=True).start()
-            except Exception as e:
-                self.log(f"[*] Erreur lors de l'acceptation d'un client : {e}")
+    def listen_to_client_messages(self, client_socket):
+        """Fonction dédiée pour écouter et traiter les messages envoyés par le client."""
+        try:
+            while True:
+                message = client_socket.recv(4096).decode("utf-8")
+                if not message:
+                    self.log("[!] Le client a fermé la connexion.")
+                    break
 
+                self.log(f"[+] Message reçu : {message}")
+
+                try:
+                    # Décodage du message en JSON
+                    data = json.loads(message)
+                    file_type = data.get("type_de_fichier", "Unknown")
+                    code = data.get("code", "")
+                    programme = data.get("programme", "")
+
+                    # Affichage des informations reçues pour vérification
+                    self.log(f"Type de fichier : {file_type}")
+                    self.log(f"Code reçu : {code}")
+                    self.log(f"Programme reçu : {programme}")
+
+                    # Décider du Slave en fonction du type de fichier
+                    target_slave = self.get_target_slave(file_type)
+                    if target_slave:
+                        self.forward_to_slave(target_slave, file_type, code, programme, client_socket)
+                    else:
+                        self.log(f"[!] Aucun Slave disponible pour le type : {file_type}")
+                        client_socket.sendall("Erreur: Aucun Slave disponible.".encode('utf-8'))
+
+                except json.JSONDecodeError:
+                    self.log("[!] Erreur : données non valides reçues.")
+                    client_socket.sendall("Erreur: Données invalides.".encode('utf-8'))
+
+        except Exception as e:
+            self.log(f"[!] Erreur lors de l'écoute des messages du client : {e}")
+            client_socket.sendall(f"Erreur lors de l'écoute des messages : {e}".encode('utf-8'))
+
+    def get_target_slave(self, file_type):
+        """Retourne un socket de Slave correspondant au rôle."""
+        if file_type in self.slaves and self.slaves[file_type]:
+            # Load balancing simple : prendre le premier Slave disponible
+            return self.slaves[file_type][0]
+        return None
+
+    def forward_to_slave(self, slave_socket, file_type, code, programme, client_socket):
+        """Envoie le fichier au Slave sélectionné et attend la réponse à renvoyer au client."""
+        try:
+            # Ajouter le programme dans le message envoyé au slave
+            message = json.dumps({"type_de_fichier": file_type, "code": code, "programme": programme})
+            slave_socket.sendall(message.encode("utf-8"))
+            self.log(f"[>] Envoyé au Slave : {file_type}, {programme}")
+
+            # Attente de la réponse du slave
+            response = slave_socket.recv(4096).decode("utf-8")
+            self.log(f"[<] Réponse du Slave : {response}")
+
+            # Renvoyer la réponse au client
+            client_socket.sendall(response.encode("utf-8"))
+            self.log(f"[<] Réponse envoyée au client.")
+        except Exception as e:
+            self.log(f"[!] Erreur d'envoi au Slave ou au client : {e}")
 
     def fermer_proprement(self):
-        """Ferme proprement la fenêtre et arrête le serveur."""
+        """Ferme proprement le serveur."""
         self.stop_server()
         self.destroy()
 
+def main():
+    app = MasterApp()
+    app.mainloop()
 
 if __name__ == "__main__":
-    app = ServeurMaster()
-    app.mainloop()
+    main()
