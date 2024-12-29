@@ -15,8 +15,6 @@ class SlaveApp(customtkinter.CTk):
 
         self.client_socket = None
         self.running = False
-        self.max_programs = 5  # Par défaut
-        self.current_programs = 0
         self.lock = threading.Lock()
 
         self.title("Slave")
@@ -88,11 +86,10 @@ class SlaveApp(customtkinter.CTk):
                     data = json.loads(message)
                     file_type = data.get("type_de_fichier", "Inconnu")
                     program_code = data.get("code", "")
-                    load_balancing = data.get("loadB", self.max_programs)
-                    self.log(f"[*] Tâche reçue : {file_type}\n[*]Load Balancing : {load_balancing}\n[*] Programme: {program_code}")
+                    self.log(f"[*] Tâche reçue : {file_type}\n[*] Programme: {program_code}")
 
                     # Traiter la tâche
-                    threading.Thread(target=self.process_task, args=(file_type, program_code, load_balancing)).start()
+                    threading.Thread(target=self.process_task, args=(file_type, program_code)).start()
 
                 except json.JSONDecodeError:
                     self.log("[!] Erreur : données non valides reçues.")
@@ -100,16 +97,8 @@ class SlaveApp(customtkinter.CTk):
                 self.log(f"[!] Erreur de réception : {e}")
                 break
 
-    def process_task(self, file_type, program_code, load_balancing):
+    def process_task(self, file_type, program_code):
         try:
-            with self.lock:
-                if self.current_programs >= load_balancing:
-                    self.log("[!] Nombre maximum de programmes atteint.")
-                    response = json.dumps({"error": "Nombre maximum de programmes atteint."})
-                    self.client_socket.sendall(response.encode("utf-8"))
-                    return
-                self.current_programs += 1
-
             # Générer des noms uniques pour les fichiers
             filename = f"/tmp/temp_{uuid.uuid4().hex}.c" if file_type == "C" else f"/tmp/temp_{uuid.uuid4().hex}.cpp"
             executable = f"/tmp/temp_{uuid.uuid4().hex}"
@@ -151,8 +140,6 @@ class SlaveApp(customtkinter.CTk):
         except Exception as e:
             self.log(f"[!] Erreur : {e}")
         finally:
-            with self.lock:
-                self.current_programs -= 1
             # Nettoyage
             if os.path.exists(filename):
                 os.remove(filename)
