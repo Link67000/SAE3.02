@@ -1,11 +1,11 @@
-import socket
+import socket 
 import threading
 import json
 import subprocess
 import os
 import uuid
 import customtkinter
-import re  # Import pour les expressions régulières
+import re 
 
 customtkinter.set_appearance_mode("dark")
 customtkinter.set_default_color_theme("blue")
@@ -18,23 +18,23 @@ class SlaveApp(customtkinter.CTk):
         self.running = False
         self.lock = threading.Lock()
 
-        self.title("Slave")
-        self.geometry("500x400")
+        self.title("Esclave")
+        self.geometry("500x340")
+        self.resizable(False, False)
 
-        # Interface utilisateur
         self.master_addr_txt = customtkinter.CTkLabel(self, text="Adresse du Master :")
         self.master_addr_txt.place(x=10, y=10)
         self.master_addr = customtkinter.CTkEntry(self, width=150, justify="center")
-        self.master_addr.place(x=180, y=10)
-        self.master_addr.insert(0, "192.168.1.80")
+        self.master_addr.place(x=175, y=10)
+        self.master_addr.insert(0, "192.168.x.y")
 
         self.master_port_txt = customtkinter.CTkLabel(self, text="Port du Master :")
         self.master_port_txt.place(x=10, y=50)
         self.master_port = customtkinter.CTkEntry(self, width=150, justify="center")
-        self.master_port.place(x=180, y=50)
+        self.master_port.place(x=175, y=50)
         self.master_port.insert(0, "1111")
 
-        self.start_stop_button = customtkinter.CTkButton(self, text="Démarrer", width=380, height=30, command=self.toggle_connection)
+        self.start_stop_button = customtkinter.CTkButton(self, text="Démarrer", width=480, height=30, command=self.toggle_connection)
         self.start_stop_button.place(x=10, y=90)
 
         self.log_box = customtkinter.CTkTextbox(self, width=480, height=200)
@@ -43,7 +43,7 @@ class SlaveApp(customtkinter.CTk):
         self.protocol("WM_DELETE_WINDOW", self.fermer_proprement)
 
     def log(self, message):
-        self.log_box.insert("1.0", message + "\n")
+        self.log_box.insert("1.0", message + "\n\n")
         print(message)
 
     def toggle_connection(self):
@@ -60,8 +60,6 @@ class SlaveApp(customtkinter.CTk):
             self.client_socket.connect((self.master_addr.get(), int(self.master_port.get())))
             self.running = True
             self.log("[*] Connecté au Master.")
-
-            # Envoi du rôle
             role = "JAVA/Python"
             self.client_socket.sendall(role.encode("utf-8"))
 
@@ -89,7 +87,6 @@ class SlaveApp(customtkinter.CTk):
                     program_code = data.get("code", "")
                     self.log(f"[*] Tâche reçue : {file_type}\n[*] Programme: {program_code}")
 
-                    # Traiter la tâche
                     threading.Thread(target=self.process_task, args=(file_type, program_code)).start()
 
                 except json.JSONDecodeError:
@@ -99,33 +96,28 @@ class SlaveApp(customtkinter.CTk):
                 break
 
     def extract_java_class_name(self, code):
-        """Extrait le nom de la classe publique dans un code Java via une expression régulière."""
         match = re.search(r'public\s+class\s+(\w+)', code)
         if match:
             self.log(f"[!] {match}")
             return match.group(1)
         else:
             self.log("[!] Aucune classe publique trouvée.")
-            return "Main"  # Nom par défaut si aucune classe publique n'est trouvée
+            return "Main" 
 
     def process_task(self, file_type, program_code):
         try:
-            # Générer des noms uniques pour les fichiers
             filename = f"/tmp/temp_{uuid.uuid4().hex}.java" if file_type == "Java" else f"/tmp/temp_{uuid.uuid4().hex}.py"
             executable = f"/tmp/temp_{uuid.uuid4().hex}"
 
-            # Déterminer le compilateur/interpréteur
             if file_type == "Java":
                 class_name = self.extract_java_class_name(program_code)
 
-                # Sauvegarder le code source Java dans un fichier
                 filename = f"/tmp/{class_name}.java"
                 self.log(f"[!] nom {filename}")
 
                 with open(filename, "w") as f:
                     f.write(program_code)
 
-                # Compilation Java
                 compile_command = ["javac", filename]
                 compile_process = subprocess.run(compile_command, capture_output=True, text=True)
 
@@ -135,8 +127,7 @@ class SlaveApp(customtkinter.CTk):
                     self.client_socket.sendall(response.encode("utf-8"))
                     return
 
-                # Exécution Java
-                execute_command = ["java", "-cp", "/tmp", class_name]  # Utilisez "-cp /tmp" pour spécifier le classpath
+                execute_command = ["java", "-cp", "/tmp", class_name] 
 
             elif file_type == "Python":
                 with open(filename, "w") as f:
@@ -146,7 +137,6 @@ class SlaveApp(customtkinter.CTk):
                 self.log(f"[!] Type de fichier inconnu : {file_type}")
                 return
 
-            # Exécution du programme
             execute_process = subprocess.run(execute_command, capture_output=True, text=True)
 
             if execute_process.returncode != 0:
@@ -161,7 +151,6 @@ class SlaveApp(customtkinter.CTk):
         except Exception as e:
             self.log(f"[!] Erreur : {e}")
         finally:
-            # Nettoyage
             if os.path.exists(filename):
                 os.remove(filename)
 
