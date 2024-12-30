@@ -9,87 +9,85 @@ import customtkinter
 customtkinter.set_appearance_mode("dark")
 customtkinter.set_default_color_theme("blue")
 
-class SlaveApp(customtkinter.CTk):
+class ApplicationEsclave(customtkinter.CTk):
     def __init__(self):
         super().__init__()
 
-        self.client_socket = None
-        self.running = False
-        self.lock = threading.Lock()
+        self.socket_client = None
+        self.en_cours = False
+        self.verrou = threading.Lock()
 
-        self.title("Slave")
-        self.geometry("500x400")
+        self.title("Esclave")
+        self.geometry("500x340")
+        self.resizable(False, False)
 
-        # Interface utilisateur
         self.master_addr_txt = customtkinter.CTkLabel(self, text="Adresse du Master :")
         self.master_addr_txt.place(x=10, y=10)
-        self.master_addr = customtkinter.CTkEntry(self, width=150, justify="center")
-        self.master_addr.place(x=180, y=10)
-        self.master_addr.insert(0, "192.168.1.80")
+        self.adresse_master = customtkinter.CTkEntry(self, width=150, justify="center")
+        self.adresse_master.place(x=175, y=10)
+        self.adresse_master.insert(0, "192.168.x.y")
 
         self.master_port_txt = customtkinter.CTkLabel(self, text="Port du Master :")
         self.master_port_txt.place(x=10, y=50)
-        self.master_port = customtkinter.CTkEntry(self, width=150, justify="center")
-        self.master_port.place(x=180, y=50)
-        self.master_port.insert(0, "1111")
+        self.port_master = customtkinter.CTkEntry(self, width=150, justify="center")
+        self.port_master.place(x=175, y=50)
+        self.port_master.insert(0, "1111")
 
-        self.start_stop_button = customtkinter.CTkButton(self, text="Démarrer", width=380, height=30, command=self.toggle_connection)
-        self.start_stop_button.place(x=10, y=90)
+        self.bouton_demarrer_arreter = customtkinter.CTkButton(self, text="Démarrer", width=480, height=30, command=self.basculer_connexion)
+        self.bouton_demarrer_arreter.place(x=10, y=90)
 
-        self.log_box = customtkinter.CTkTextbox(self, width=480, height=200)
-        self.log_box.place(x=10, y=130)
+        self.boite_log = customtkinter.CTkTextbox(self, width=480, height=200)
+        self.boite_log.place(x=10, y=130)
 
         self.protocol("WM_DELETE_WINDOW", self.fermer_proprement)
 
     def log(self, message):
-        self.log_box.insert("1.0", message + "\n")
+        self.boite_log.insert("1.0", message + "\n\n")
         print(message)
 
-    def toggle_connection(self):
-        if not self.running:
-            self.start_client()
-            self.start_stop_button.configure(text="Arrêter")
+    def basculer_connexion(self):
+        if not self.en_cours:
+            self.demarrer_client()
+            self.bouton_demarrer_arreter.configure(text="Arrêter")
         else:
-            self.stop_client()
-            self.start_stop_button.configure(text="Démarrer")
+            self.arreter_client()
+            self.bouton_demarrer_arreter.configure(text="Démarrer")
 
-    def start_client(self):
+    def demarrer_client(self):
         try:
-            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.client_socket.connect((self.master_addr.get(), int(self.master_port.get())))
-            self.running = True
+            self.socket_client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socket_client.connect((self.adresse_master.get(), int(self.port_master.get())))
+            self.en_cours = True
             self.log("[*] Connecté au Master.")
 
-            # Envoi du rôle
             role = "C/C++"
-            self.client_socket.sendall(role.encode("utf-8"))
+            self.socket_client.sendall(role.encode("utf-8"))
 
-            threading.Thread(target=self.listen_to_master, daemon=True).start()
+            threading.Thread(target=self.ecouter_master, daemon=True).start()
         except Exception as e:
             self.log(f"[!] Erreur : {e}")
 
-    def stop_client(self):
-        self.running = False
-        if self.client_socket:
-            self.client_socket.close()
-            self.client_socket = None
+    def arreter_client(self):
+        self.en_cours = False
+        if self.socket_client:
+            self.socket_client.close()
+            self.socket_client = None
         self.log("[*] Déconnecté du Master.")
 
-    def listen_to_master(self):
-        while self.running:
+    def ecouter_master(self):
+        while self.en_cours:
             try:
-                message = self.client_socket.recv(4096).decode("utf-8")
+                message = self.socket_client.recv(4096).decode("utf-8")
                 if not message:
                     break
 
                 try:
-                    data = json.loads(message)
-                    file_type = data.get("type_de_fichier", "Inconnu")
-                    program_code = data.get("code", "")
-                    self.log(f"[*] Tâche reçue : {file_type}\n[*] Programme: {program_code}")
+                    donnees = json.loads(message)
+                    type_fichier = donnees.get("type_de_fichier", "Inconnu")
+                    code_programme = donnees.get("code", "")
+                    self.log(f"[*] Tâche reçue : {type_fichier}\n[*] Programme: {code_programme}")
 
-                    # Traiter la tâche
-                    threading.Thread(target=self.process_task, args=(file_type, program_code)).start()
+                    threading.Thread(target=self.traiter, args=(type_fichier, code_programme)).start()
 
                 except json.JSONDecodeError:
                     self.log("[!] Erreur : données non valides reçues.")
@@ -97,62 +95,56 @@ class SlaveApp(customtkinter.CTk):
                 self.log(f"[!] Erreur de réception : {e}")
                 break
 
-    def process_task(self, file_type, program_code):
+    def traiter(self, type_fichier, code_programme):
         try:
-            # Générer des noms uniques pour les fichiers
-            filename = f"/tmp/temp_{uuid.uuid4().hex}.c" if file_type == "C" else f"/tmp/temp_{uuid.uuid4().hex}.cpp"
+            nom_fichier = f"/tmp/temp_{uuid.uuid4().hex}.c" if type_fichier == "C" else f"/tmp/temp_{uuid.uuid4().hex}.cpp"
             executable = f"/tmp/temp_{uuid.uuid4().hex}"
 
-            # Déterminer le compilateur
-            compiler = "gcc" if file_type == "C" else "g++" if file_type == "C++" else None
-            if not compiler:
-                self.log(f"[!] Type de fichier inconnu : {file_type}")
+            compilateur = "gcc" if type_fichier == "C" else "g++" if type_fichier == "C++" else None
+            if not compilateur:
+                self.log(f"[!] Type de fichier inconnu : {type_fichier}")
                 return
 
-            with open(filename, "w") as f:
-                f.write(program_code)
+            with open(nom_fichier, "w") as f:
+                f.write(code_programme)
 
-            # Compilation
-            compile_command = [compiler, filename, "-o", executable]
-            compile_process = subprocess.run(compile_command, capture_output=True, text=True)
+            commande_compilation = [compilateur, nom_fichier, "-o", executable]
+            processus_compilation = subprocess.run(commande_compilation, capture_output=True, text=True)
 
-            if compile_process.returncode != 0:
-                self.log(f"[!] Erreur de compilation : {compile_process.stderr}")
-                response = json.dumps({"error": compile_process.stderr})
-                self.client_socket.sendall(response.encode("utf-8"))
+            if processus_compilation.returncode != 0:
+                self.log(f"[!] Erreur de compilation : {processus_compilation.stderr}")
+                reponse = json.dumps({"erreur": processus_compilation.stderr})
+                self.socket_client.sendall(reponse.encode("utf-8"))
                 return
 
-            # Donner les permissions d'exécution
             subprocess.run(["chmod", "+x", executable])
 
-            # Exécution
-            execute_process = subprocess.run([executable], capture_output=True, text=True)
+            processus_execution = subprocess.run([executable], capture_output=True, text=True)
 
-            if execute_process.returncode != 0:
-                self.log(f"[!] Erreur d'exécution : {execute_process.stderr}")
-                response = json.dumps({"error": execute_process.stderr})
+            if processus_execution.returncode != 0:
+                self.log(f"[!] Erreur d'exécution : {processus_execution.stderr}")
+                reponse = json.dumps({"erreur": processus_execution.stderr})
             else:
-                self.log(f"[*] Résultat : {execute_process.stdout}")
-                response = json.dumps({"resultat": execute_process.stdout})
+                self.log(f"[*] Résultat : {processus_execution.stdout}")
+                reponse = json.dumps({"resultat": processus_execution.stdout})
 
-            self.client_socket.sendall(response.encode("utf-8"))
+            self.socket_client.sendall(reponse.encode("utf-8"))
 
         except Exception as e:
             self.log(f"[!] Erreur : {e}")
         finally:
-            # Nettoyage
-            if os.path.exists(filename):
-                os.remove(filename)
+            if os.path.exists(nom_fichier):
+                os.remove(nom_fichier)
             if os.path.exists(executable):
                 os.remove(executable)
 
     def fermer_proprement(self):
-        self.stop_client()
+        self.arreter_client()
         self.destroy()
 
 
 def main():
-    app = SlaveApp()
+    app = ApplicationEsclave()
     app.mainloop()
 
 
