@@ -82,7 +82,6 @@ class Sae(customtkinter.CTk):
             if self.client_socket and self.is_connected:
                 try:
                     programme = self.programme_txt.get("0.0", "end").strip()
-                    print(f"Contenu récupéré : {programme}")
 
                     if not programme:
                         self.terminal.insert("0.0", "[*] Le contenu du programme est vide. Rien à envoyer.\n\n")
